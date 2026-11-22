@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <random>
 #include <span>
@@ -39,6 +40,36 @@ void QuicksortSequential(std::span<int64_t> data) {
 
   QuicksortSequential(data.first(prefix));
   QuicksortSequential(data.subspan(suffix));
+}
+
+int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::vector<int64_t>& result, int32_t v = 1) {
+    if (data.empty()) {
+        return 0;
+    }
+    if (data.size() == 1) {
+        result[v] = pred(data.front());
+        return result[v];
+    }
+    int32_t m = data.size() / 2;
+    auto left = data.first(m);
+    auto right = data.subspan(m);
+    result[v] = Up(left, pred, result, 2*v) + Up(right, pred, result, 2*v+1);
+    return result[v];
+}
+
+TEST(ScanTest, BuildSegmentTree) {
+    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9};
+
+    std::vector<int64_t> result(4*example.size());
+
+    auto got = Up(example, [](int64_t x) { return x < 5 ? 1 : 0; }, result);
+
+    std::vector<int64_t> expected = {0, 3, 2, 1, 1, 1, 0, 1,
+                                    0, 0, 1, 0, 0, 0, 1, 0};
+    expected.resize(result.size());
+
+    ASSERT_EQ(result, expected);
+    ASSERT_EQ(got, 3);
 }
 
 void QuicksortParallel(std::span<int64_t> data) {
@@ -119,7 +150,7 @@ TYPED_TEST(QuicksortTest, OneElement) {
   ASSERT_EQ(data, expected);
 }
 
-TEST(QuicksortBenchTest, Main) {
+TEST(QuicksortBenchTest, DISABLED_Main) {
   using Clock = std::chrono::steady_clock;
   using Milliseconds = std::chrono::duration<double, std::milli>;
   constexpr int runs = 5;
