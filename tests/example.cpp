@@ -69,8 +69,8 @@ void QuicksortParallel(std::span<int64_t> data) {
     }
   }
 
-  parlay::par_do([&] { QuicksortSequential(data.first(prefix)); },
-                 [&] { QuicksortSequential(data.subspan(suffix)); });
+  parlay::par_do([data, prefix] { QuicksortParallel(data.first(prefix)); },
+                 [data, suffix] { QuicksortParallel(data.subspan(suffix)); });
 }
 
 template <typename Sort>
