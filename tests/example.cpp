@@ -55,8 +55,8 @@ int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::v
     auto right = data.subspan(m);
     int64_t result_left, result_right;
     parlay::par_do(
-        [&]() { result_left = Up(left, pred, result, 2 * v); },
-        [&]() { result_right = Up(right, pred, result, 2 * v + 1); });
+        [&] { result_left = Up(left, pred, result, 2 * v); },
+        [&] { result_right = Up(right, pred, result, 2 * v + 1); });
     result[v] = result_left + result_right;
     return result[v];
 }
@@ -74,6 +74,38 @@ TEST(ScanTest, BuildSegmentTree) {
 
     ASSERT_EQ(result, expected);
     ASSERT_EQ(got, 3);
+}
+
+void Down(std::span<int64_t> p, const std::vector<int64_t>& b, int64_t left = 0, int32_t v = 1) {
+    if (p.empty()) {
+        return;
+    }
+    if (p.size() == 1) {
+        if (b[v] == 0) {
+            p.front() = -1;
+            return;
+        }
+        p.front() = left;
+        return;
+    }
+    int m = p.size() / 2;
+    parlay::par_do([&] {
+        Down(p.first(m), b, left, 2*v);
+    }, [&] {
+        Down(p.subspan(m), b, left + b[2*v], 2*v+1);
+    });
+}
+
+TEST(ScanTest, FindPrefsums) {
+    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9};
+    std::vector<int64_t> segtree(4*example.size());
+    Up(example, [](int64_t x) { return x < 5 ? 1 : 0; }, segtree);
+
+    std::vector<int64_t> prefsum(example.size());
+    Down(prefsum, segtree);
+
+    const std::vector<int64_t> expected = {0, 1, -1, -1, -1, 2, -1};
+    ASSERT_EQ(prefsum, expected);
 }
 
 void QuicksortParallel(std::span<int64_t> data) {
