@@ -28,7 +28,7 @@ if(BUILD_TESTING)
   FetchContent_MakeAvailable(googletest)
 
   add_executable(example_tests tests/example.cpp)
-  target_link_libraries(example_tests PRIVATE GTest::gtest_main)
+  target_link_libraries(example_tests PRIVATE GTest::gtest_main parlay)
 
   include(GoogleTest)
   gtest_discover_tests(example_tests NO_PRETTY_TYPES)

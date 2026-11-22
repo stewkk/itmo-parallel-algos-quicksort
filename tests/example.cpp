@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include <parlay/parallel.h>
+
 std::mt19937 rng(42);
 
 void QuicksortSequential(std::span<int64_t> data) {
@@ -63,8 +65,8 @@ void QuicksortParallel(std::span<int64_t> data) {
     }
   }
 
-  QuicksortSequential(data.first(prefix));
-  QuicksortSequential(data.subspan(suffix));
+  parlay::par_do([&] { QuicksortSequential(data.first(prefix)); },
+                 [&] { QuicksortSequential(data.subspan(suffix)); });
 }
 
 template <typename Sort>
@@ -123,7 +125,7 @@ TEST(QuicksortBenchTest, Main) {
   std::mt19937 input_rng(42);
   std::uniform_int_distribution<std::int64_t> distribution(-1000000, 1000000);
 
-  std::vector<std::int64_t> data(1000);
+  std::vector<std::int64_t> data(10000000);
   for (auto &value : data) {
     value = distribution(input_rng);
   }
