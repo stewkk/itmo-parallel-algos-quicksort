@@ -3,25 +3,26 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <random>
+#include <ranges>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <parlay/parallel.h>
 
-std::mt19937 rng(42);
 constexpr size_t kBlockSize = 2048;
+constexpr auto kSequentialFallback = 262144;
 
-void QuicksortSequential(std::span<int64_t> data) {
+void QuicksortSequential(std::span<int32_t> data) {
   if (data.size() <= 1) {
     return;
   }
-  auto pivot_index =
-      std::uniform_int_distribution<std::int64_t>(0, data.size() - 1)(rng);
-  auto pivot_value = data[pivot_index];
+  auto pivot_value = data[data.size() / 2];
 
   size_t prefix = 0;
   for (int i = 0; i < data.size(); i++) {
@@ -40,10 +41,10 @@ void QuicksortSequential(std::span<int64_t> data) {
   }
 
   QuicksortSequential(data.first(prefix));
-  QuicksortSequential(data.subspan(suffix));
+  QuicksortSequential(data.subspan(suffix + 1));
 }
 
-int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::vector<int64_t>& result, int32_t v = 1) {
+int32_t Up(std::span<int32_t> data, std::function<int32_t(int32_t)> pred, std::vector<int32_t>& result, int32_t v = 1) {
     if (data.empty()) {
         return 0;
     }
@@ -54,7 +55,7 @@ int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::v
     int32_t m = data.size() / 2;
     auto left = data.first(m);
     auto right = data.subspan(m);
-    int64_t result_left, result_right;
+    int32_t result_left, result_right;
     parlay::par_do(
         [&] { result_left = Up(left, pred, result, 2 * v); },
         [&] { result_right = Up(right, pred, result, 2 * v + 1); });
@@ -63,13 +64,13 @@ int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::v
 }
 
 TEST(ScanTest, BuildSegmentTree) {
-    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9};
+    std::vector<int32_t> example = {2, 3, 7, 6, 5, 4, 9};
 
-    std::vector<int64_t> result(4*example.size());
+    std::vector<int32_t> result(4*example.size());
 
-    auto got = Up(example, [](int64_t x) { return x < 5 ? 1 : 0; }, result);
+    auto got = Up(example, [](int32_t x) { return x < 5; }, result);
 
-    std::vector<int64_t> expected = {0, 3, 2, 1, 1, 1, 0, 1,
+    std::vector<int32_t> expected = {0, 3, 2, 1, 1, 1, 0, 1,
                                     0, 0, 1, 0, 0, 0, 1, 0};
     expected.resize(result.size());
 
@@ -77,7 +78,7 @@ TEST(ScanTest, BuildSegmentTree) {
     ASSERT_EQ(got, 3);
 }
 
-void Down(std::span<int64_t> p, const std::vector<int64_t>& b, int64_t offset, int64_t left = 0, int32_t v = 1) {
+void Down(std::span<int32_t> p, const std::vector<int32_t>& b, int32_t offset, int32_t left = 0, int32_t v = 1) {
     if (p.empty()) {
         return;
     }
@@ -97,18 +98,19 @@ void Down(std::span<int64_t> p, const std::vector<int64_t>& b, int64_t offset, i
 }
 
 TEST(ScanTest, FindPrefsums) {
-    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9, 1};
-    std::vector<int64_t> segtree(4*example.size());
-    Up(example, [](int64_t x) { return x < 5 ? 1 : 0; }, segtree);
+    std::vector<int32_t> example = {2, 3, 7, 6, 5, 4, 9, 1};
+    std::vector<int32_t> segtree(4*example.size());
+    Up(example, [](int32_t x) { return x < 5; }, segtree);
 
-    std::vector<int64_t> prefsum(example.size());
+    std::vector<int32_t> prefsum(example.size());
     Down(prefsum, segtree, 0);
 
-    const std::vector<int64_t> expected = {0, 1, 0, 0, 0, 2, 0, 3};
+    const std::vector<int32_t> expected = {0, 1, 0, 0, 0, 2, 0, 3};
     ASSERT_EQ(prefsum, expected);
 }
 
-void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0,
+template <typename Func>
+void Map(std::span<int32_t> target, Func func, int l = 0,
          size_t block_size = kBlockSize) {
     if (target.size() <= block_size) {
         for (auto [i, _] : target | std::views::enumerate) {
@@ -124,45 +126,9 @@ void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0
     });
 }
 
-int64_t Scan(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::vector<int64_t>& prefsum, int64_t overall_offset) {
-    std::vector<int64_t> blocks_prefsum((data.size() + kBlockSize - 1) / kBlockSize);
-
-    Map(blocks_prefsum, [&](int32_t block) {
-        auto l = block * kBlockSize;
-        auto r = std::min(l + kBlockSize, data.size());
-        int64_t count = 0;
-        for (size_t i = l; i < r; ++i) {
-            count += pred(data[i]);
-        }
-        blocks_prefsum[block] = count;
-    }, 0, 1);
-
-    int64_t total = 0;
-    for (auto& count : blocks_prefsum) {
-        int64_t next = total + count;
-        count = total;
-        total = next;
-    }
-
-    Map(blocks_prefsum, [&](int32_t block) {
-        auto l = block * kBlockSize;
-        auto r = std::min(l + kBlockSize, data.size());
-        auto offset = blocks_prefsum[block];
-        for (size_t i = l; i < r; ++i) {
-            auto val = pred(data[i]);
-            if (val != 0) {
-                prefsum[i] = overall_offset + offset;
-                offset += val;
-            }
-        }
-    }, 0, 1);
-
-    return total;
-}
-
 TEST(ScanTest, Map) {
-    std::vector<int64_t> arr(4);
-    std::vector<int64_t> expected = {0, 1, 2, 3};
+    std::vector<int32_t> arr(4);
+    std::vector<int32_t> expected = {0, 1, 2, 3};
 
     Map(arr, [&](int32_t i) {
         arr[i] = i;
@@ -171,31 +137,58 @@ TEST(ScanTest, Map) {
     ASSERT_EQ(arr, expected);
 }
 
-void QuicksortParallel(std::span<int64_t> data) {
-  if (data.size() <= 1000) {
+void QuicksortParallel(std::span<int32_t> data) {
+  if (data.size() <= kSequentialFallback) {
       QuicksortSequential(data);
       return;
   }
-  if (data.size() <= 1) {
-    return;
+  auto pivot_value = data[data.size() / 2];
+  auto left = 0, right = 0;
+  {
+    auto blocks = (data.size() + kBlockSize - 1) / kBlockSize;
+    std::vector<int32_t> less(blocks), greater(blocks);
+    std::vector<int32_t> scratch(data.size());
+    Map(less, [&](int32_t block) {
+      auto l = block * kBlockSize;
+      auto r = std::min(l + kBlockSize, data.size());
+      auto min = l, max = r;
+      for (auto i = l; i < r; ++i) {
+        auto value = data[i];
+        scratch[min] = value;
+        scratch[max - 1] = value;
+        min += value < pivot_value;
+        max -= value > pivot_value;
+      }
+      less[block] = min - l;
+      greater[block] = r - max;
+    }, 0, 1);
+
+    for (size_t b = 0; b < blocks; ++b) {
+      left += less[b];
+      right += greater[b];
+      less[b] = left;
+      greater[b] = right;
+    }
+    Map(less, [&](int32_t b) {
+      auto prev_less = 0, prev_greater = 0;
+      if (b > 0) {
+        prev_less = less[b - 1];
+        prev_greater = greater[b - 1];
+      }
+      auto l = b * kBlockSize;
+      auto r = std::min(l + kBlockSize, data.size());
+      for (auto i = prev_less; i < less[b]; ++i) {
+        data[i] = scratch[l + (i - prev_less)];
+      }
+      for (auto i = prev_greater; i < greater[b]; ++i) {
+        data[data.size() - right + i] = scratch[r - (greater[b] - i)];
+      }
+      for (auto i = l - prev_less - prev_greater; i < r - less[b] - greater[b]; ++i) {
+        data[left + i] = pivot_value;
+      }
+    }, 0, 1);
   }
-  auto pivot_index =
-      std::uniform_int_distribution<std::int64_t>(0, data.size() - 1)(rng);
-  auto pivot_value = data[pivot_index];
-
-  std::vector<int64_t> prefsum(data.size());
-  auto left = Scan(data, [pivot_value](int64_t x) { return x < pivot_value ? 1 : 0; }, prefsum, 0);
-  auto mid = Scan(data, [pivot_value](int64_t x) { return x == pivot_value ? 1 : 0; }, prefsum, left);
-  auto right = Scan(data, [pivot_value](int64_t x) { return x > pivot_value ? 1 : 0; }, prefsum, left+mid);
-
-  std::vector<int64_t> data_copy(data.size());
-  Map(data_copy, [&](int32_t i) {
-      data_copy[i] = data[i];
-  });
-
-  Map(data_copy, [&](int32_t i) {
-      data[prefsum[i]] = data_copy[i];
-  });
+  auto mid = data.size() - left - right;
 
   parlay::par_do([data, left] { QuicksortParallel(data.first(left)); },
                  [data, left, mid] { QuicksortParallel(data.subspan(left+mid)); });
@@ -214,9 +207,9 @@ TYPED_TEST_SUITE(QuicksortTest, QuicksortImplementations);
 
 TYPED_TEST(QuicksortTest, Stress) {
   std::mt19937 input_rng(42);
-  std::uniform_int_distribution<std::int64_t> distribution(-100, 100);
+  std::uniform_int_distribution<std::int32_t> distribution(-100, 100);
   for (int it = 0; it < 1000; it++) {
-    std::vector<std::int64_t> data(distribution(input_rng) + 1001);
+    std::vector<std::int32_t> data(distribution(input_rng) + 1001);
     for (auto &value : data) {
       value = distribution(input_rng);
     }
@@ -230,7 +223,7 @@ TYPED_TEST(QuicksortTest, Stress) {
 }
 
 TYPED_TEST(QuicksortTest, Empty) {
-  std::vector<std::int64_t> data(0);
+  std::vector<std::int32_t> data(0);
   auto expected = data;
 
   TypeParam::value(data);
@@ -239,7 +232,7 @@ TYPED_TEST(QuicksortTest, Empty) {
 }
 
 TYPED_TEST(QuicksortTest, OneElement) {
-  std::vector<std::int64_t> data(1, 42);
+  std::vector<std::int32_t> data(1, 42);
   auto expected = data;
 
   TypeParam::value(data);
@@ -255,9 +248,9 @@ TEST(QuicksortBenchTest, Main) {
   Milliseconds parallel_total{};
 
   std::mt19937 input_rng(42);
-  std::uniform_int_distribution<std::int64_t> distribution(-1000000, 1000000);
+  std::uniform_int_distribution<int32_t> distribution(std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max());
 
-  std::vector<std::int64_t> data(10000000);
+  std::vector<std::int32_t> data(100000000);
   for (auto &value : data) {
     value = distribution(input_rng);
   }
@@ -265,11 +258,11 @@ TEST(QuicksortBenchTest, Main) {
     auto copy1 = data;
     auto copy2 = data;
 
-    const auto sequential_start = Clock::now();
+    auto sequential_start = Clock::now();
     QuicksortSequential(copy1);
     const Milliseconds sequential_time = Clock::now() - sequential_start;
 
-    const auto parallel_start = Clock::now();
+    auto parallel_start = Clock::now();
     QuicksortParallel(copy2);
     const Milliseconds parallel_time = Clock::now() - parallel_start;
 
