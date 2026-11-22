@@ -42,6 +42,10 @@ void QuicksortSequential(std::span<int64_t> data) {
 }
 
 void QuicksortParallel(std::span<int64_t> data) {
+  if (data.size() <= 1000) {
+      QuicksortSequential(data);
+      return;
+  }
   if (data.size() <= 1) {
     return;
   }
