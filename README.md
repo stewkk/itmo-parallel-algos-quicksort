@@ -20,3 +20,13 @@ Run 4: sequential 10896 ms, parallel 4028.72 ms
 Run 5: sequential 10944.6 ms, parallel 3861.83 ms
 Average: sequential 10997.2 ms, parallel 3986.49 ms
 ``` 
+
+Сборка:
+
+``` sh
+mkdir build
+cd build/
+cmake .. -D CMAKE_BUILD_TYPE=Release
+cmake --build .
+PARLAY_NUM_THREADS=4 ./example_tests
+```
