@@ -1,4 +1,4 @@
-Просто добавить fork2join и оставить последовательный partition, тоже дает почти x3:
+Просто добавить fork2join и оставить последовательный partition, тоже дает почти x3 ([коммит](https://github.com/stewkk/itmo-parallel-algos-quicksort/tree/c0b34416733c0edc7cddc27f1ad213cc6b690c94)):
 ``` 
 [ RUN      ] QuicksortBenchTest.Main
 Run 1: sequential 14352.6 ms, parallel 5896.59 ms
