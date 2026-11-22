@@ -31,5 +31,5 @@ if(BUILD_TESTING)
   target_link_libraries(example_tests PRIVATE GTest::gtest_main)
 
   include(GoogleTest)
-  gtest_discover_tests(example_tests)
+  gtest_discover_tests(example_tests NO_PRETTY_TYPES)
 endif()
