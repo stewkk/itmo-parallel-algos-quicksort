@@ -97,15 +97,23 @@ void Down(std::span<int64_t> p, const std::vector<int64_t>& b, int64_t left = 0,
 }
 
 TEST(ScanTest, FindPrefsums) {
-    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9};
+    std::vector<int64_t> example = {2, 3, 7, 6, 5, 4, 9, 1};
     std::vector<int64_t> segtree(4*example.size());
     Up(example, [](int64_t x) { return x < 5 ? 1 : 0; }, segtree);
 
     std::vector<int64_t> prefsum(example.size());
     Down(prefsum, segtree);
 
-    const std::vector<int64_t> expected = {0, 1, -1, -1, -1, 2, -1};
+    const std::vector<int64_t> expected = {0, 1, -1, -1, -1, 2, -1, 3};
     ASSERT_EQ(prefsum, expected);
+}
+
+std::vector<int64_t> Scan(std::span<int64_t> data, std::function<int64_t(int64_t)> pred) {
+    std::vector<int64_t> segtree(4*data.size());
+    Up(data, pred, segtree);
+    std::vector<int64_t> prefsum(data.size());
+    Down(prefsum, segtree);
+    return prefsum;
 }
 
 void QuicksortParallel(std::span<int64_t> data) {
@@ -120,21 +128,11 @@ void QuicksortParallel(std::span<int64_t> data) {
       std::uniform_int_distribution<std::int64_t>(0, data.size() - 1)(rng);
   auto pivot_value = data[pivot_index];
 
-  size_t prefix = 0;
-  for (int i = 0; i < data.size(); i++) {
-    if (data[i] < pivot_value) {
-      std::swap(data[i], data[prefix]);
-      prefix++;
-    }
-  }
+  auto left = Scan(data, [pivot_value](int64_t x) { return x < pivot_value ? 1 : 0; });
+  auto middle = Scan(data, [pivot_value](int64_t x) { return x == pivot_value ? 1 : 0; });
+  auto right = Scan(data, [pivot_value](int64_t x) { return x > pivot_value ? 1 : 0; });
 
-  size_t suffix = data.size() - 1;
-  for (int i = data.size() - 1; i >= 0; i--) {
-    if (data[i] > pivot_value) {
-      std::swap(data[i], data[suffix]);
-      suffix--;
-    }
-  }
+
 
   parlay::par_do([data, prefix] { QuicksortParallel(data.first(prefix)); },
                  [data, suffix] { QuicksortParallel(data.subspan(suffix)); });
