@@ -53,7 +53,11 @@ int64_t Up(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::v
     int32_t m = data.size() / 2;
     auto left = data.first(m);
     auto right = data.subspan(m);
-    result[v] = Up(left, pred, result, 2*v) + Up(right, pred, result, 2*v+1);
+    int64_t result_left, result_right;
+    parlay::par_do(
+        [&]() { result_left = Up(left, pred, result, 2 * v); },
+        [&]() { result_right = Up(right, pred, result, 2 * v + 1); });
+    result[v] = result_left + result_right;
     return result[v];
 }
 
