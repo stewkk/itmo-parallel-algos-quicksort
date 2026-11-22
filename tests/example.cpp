@@ -108,15 +108,9 @@ TEST(ScanTest, FindPrefsums) {
     ASSERT_EQ(prefsum, expected);
 }
 
-int64_t Scan(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::vector<int64_t>& prefsum, int64_t offset) {
-    std::vector<int64_t> segtree(4*data.size());
-    auto sum = Up(data, pred, segtree);
-    Down(prefsum, segtree, offset);
-    return sum;
-}
-
-void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0) {
-    if (target.size() <= kBlockSize) {
+void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0,
+         size_t block_size = kBlockSize) {
+    if (target.size() <= block_size) {
         for (auto [i, _] : target | std::views::enumerate) {
             func(l+i);
         }
@@ -124,10 +118,46 @@ void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0
     }
     int32_t m = target.size() / 2;
     parlay::par_do([=] {
-        Map(target.first(m), func, l);
+        Map(target.first(m), func, l, block_size);
     }, [=] {
-        Map(target.subspan(m), func, l+m);
+        Map(target.subspan(m), func, l+m, block_size);
     });
+}
+
+int64_t Scan(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std::vector<int64_t>& prefsum, int64_t overall_offset) {
+    std::vector<int64_t> blocks_prefsum((data.size() + kBlockSize - 1) / kBlockSize);
+
+    Map(blocks_prefsum, [&](int32_t block) {
+        auto l = block * kBlockSize;
+        auto r = std::min(l + kBlockSize, data.size());
+        int64_t count = 0;
+        for (size_t i = l; i < r; ++i) {
+            count += pred(data[i]);
+        }
+        blocks_prefsum[block] = count;
+    }, 0, 1);
+
+    int64_t total = 0;
+    for (auto& count : blocks_prefsum) {
+        int64_t next = total + count;
+        count = total;
+        total = next;
+    }
+
+    Map(blocks_prefsum, [&](int32_t block) {
+        auto l = block * kBlockSize;
+        auto r = std::min(l + kBlockSize, data.size());
+        auto offset = blocks_prefsum[block];
+        for (size_t i = l; i < r; ++i) {
+            auto val = pred(data[i]);
+            if (val != 0) {
+                prefsum[i] = overall_offset + offset;
+                offset += val;
+            }
+        }
+    }, 0, 1);
+
+    return total;
 }
 
 TEST(ScanTest, Map) {
