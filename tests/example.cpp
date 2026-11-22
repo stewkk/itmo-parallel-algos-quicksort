@@ -13,6 +13,7 @@
 #include <parlay/parallel.h>
 
 std::mt19937 rng(42);
+constexpr size_t kBlockSize = 2048;
 
 void QuicksortSequential(std::span<int64_t> data) {
   if (data.size() <= 1) {
@@ -115,8 +116,10 @@ int64_t Scan(std::span<int64_t> data, std::function<int64_t(int64_t)> pred, std:
 }
 
 void Map(std::span<int64_t> target, std::function<void(int32_t)> func, int l = 0) {
-    if (target.size() == 1) {
-        func(l);
+    if (target.size() <= kBlockSize) {
+        for (auto [i, _] : target | std::views::enumerate) {
+            func(l+i);
+        }
         return;
     }
     int32_t m = target.size() / 2;
